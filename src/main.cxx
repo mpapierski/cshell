@@ -29,21 +29,36 @@
  */
 
 #include <iostream>
+#include <sstream>
+#include <fstream>
 #include <string>
+#include <list>
+#include <vector>
+#include <cstdlib>
+#include <errno.h>
 
 #include "../Config.h"
 
-#if defined(HAVE_READLINE)
+#if defined(READLINE_FOUND)
 #	include <readline/readline.h>
 #	include <readline/history.h>
 #endif
 
 using namespace std;
 
-#define READLINE
+static list<string> includes;
+static list<string> libraries;
+static list<string> commands;
 
-static string templateHeader = "#include <iostream>";
-static string templateEnd = "\treturn 0;\n}";
+static string templateHeader = "void cshell_stmt(int argc, char* argv[])\n"
+	"{\n";
+static string templateFooter = "}\n"
+	"int\n"
+	"main(int argc, char* argv[])\n"
+	"{\n"
+	"\tcshell_stmt(argc, argv);\n"
+	"\treturn 0;\n"
+	"}";
 
 class CLI
 {
@@ -51,9 +66,22 @@ class CLI
 		bool running_;
 		
 	public:
+		/**
+ 		 * Default constructor
+ 		 * Set running_ to true.
+ 		 */
 		CLI();
-		void loop();
+
+		/**
+ 		 * Read line
+ 		 * @return Line which we have to do something 
+ 		 */
+		string loop();
 		
+		/**
+ 		 * The "safe bool" idiom
+ 		 * @return Value indicating if we have to run anymore
+ 		 */
 		inline operator const bool() const
 		{
 			return running_;
@@ -62,39 +90,159 @@ class CLI
 };
 
 CLI::CLI() :
-	running_(false)
+	running_(true)
 {
 	
 }
 
-void CLI::loop()
+string CLI::loop()
 {
-#if defined(HAVE_READLINE)
- // getting the current user 'n path
-        snprintf(shell_prompt, sizeof(shell_prompt), "%s:%s $ ", getenv("USER"), getcwd(NULL, 1024));
-        // inputing...
-        input = readline(shell_prompt);
-        // eof
-        if (!input)
-            break;
-        // path autocompletion when tabulation hit
-        rl_bind_key('\t', rl_complete);
-        // adding the previous input into history
-        add_history(input);
+	static const char prompt[] = ">>";
+#if defined(READLINE_FOUND)
+	char* input = readline(prompt);
+	if (!input)
+	{
+		running_ = false;
+		return "";
+	}
+	/* TODO: Auto complete */
+	// rl_bind_key('\t', rl_complete);
+	add_history(input);
+	string line(input);
 #else
+	if (cin.eof())
+	{
+		running_ = false;
+		return "";
+	}
+
 	string line;
 	cout << ">> ";
 	getline(cin, line);
 #endif 
-	cout << "Input(" << line << ")" << endl;
+	return input;
+}
+
+static string sourceCode()
+{
+	ostringstream out;
+	for (list<string>::const_iterator it(includes.begin()),
+			end(includes.end()); it != end; ++it)
+	{
+		out << "#include <" << *it << ">" << endl;
+	}
+
+	out << templateHeader << endl;
+
+	for (list<string>::const_iterator it(commands.begin()),
+			end(commands.end()); it != end; ++it)
+	{
+		out << *it << endl;
+	}
+	out << templateFooter << endl;
+
+	return out.str();
+}
+
+static bool execute(const std::string& inputFile)
+{
+	vector<char*> params;
+	params.resize(libraries.size());
+	int i = 0;
+	for (list<string>::const_iterator it(libraries.begin()),
+		end(libraries.end()); it != end; ++it)
+	{
+		/*
+ 		 * Remember not to write to params,
+ 		 * because weird things might happen
+ 		 */
+		params[i++] = const_cast<char*>(it->c_str());
+	}
+	/* Write source code to a temporary file */
+	char* temp = strdup("/tmp/cshellXXXXXX");
+	close(mkstemp(temp));
+	string tempC = string(temp) + ".c";
+	
+	{
+		ofstream fout(tempC.c_str());
+		fout << inputFile << endl;
+	}
+
+	/* Complete parameters... */
+		string compiler = "gcc";
+		params.insert(params.begin(), const_cast<char*>(compiler.c_str()));
+		string outputParam = "-o";
+		params.push_back(const_cast<char*>(tempC.c_str()));
+		params.push_back(const_cast<char*>(outputParam.c_str()));
+		params.push_back(temp);
+		params.push_back(NULL);
+	for (vector<char*>::iterator it(params.begin()), end(params.end()); it != end; ++it)
+	{
+		cout << "\"" << *it << "\" ";
+	}
+	cout << endl;
+	
+	/* Fork from this point */
+	if (fork() == 0)
+	{
+		int resultCode = execvp("/usr/bin/gcc", &(params[0]));
+		if (resultCode == -1)
+		{
+			cout << "ERROR: #" << errno << " (" << strerror(errno) << ")" << endl;
+		}
+		return -1;
+	}
+	cout << endl;
+	return true;
 }
 
 int main(int argc, char **argv)
 {
 	CLI cli;
+	includes.push_back("stdlib.h");
+	includes.push_back("stdio.h");
+
 	while (cli)
 	{
-		cli.loop();
+		const string& inputLine = cli.loop();
+		if (inputLine.empty())
+			continue;
+		if (inputLine[0] == '+')
+		{
+			istringstream iss(inputLine);
+			vector<string> tokens;
+			do
+			{
+				string sub;
+				iss >> sub;
+				tokens.push_back(sub);
+			} while (iss);
+
+			if (tokens.size() < 2)
+				continue;
+
+			if (tokens[0] == "+include")
+			{
+				includes.push_back(tokens[1]);
+				cout << "New include: " << tokens[1] << endl;
+			}
+			else if (tokens[0] == "+library")
+			{
+				libraries.push_back("-l" + tokens[1]);
+				cout << "New link library: " << tokens[1] << endl;
+			}
+			else
+			{
+				cout << "Unknown command: " << tokens[0] << endl;
+			}
+			continue;
+		}
+		commands.push_back(inputLine);
+		const std::string& source = sourceCode();
+		if (!execute(source))
+		{
+			cout << "Failed to compile." << endl;
+		}
 	}
 	return 0;
 }
