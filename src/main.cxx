@@ -49,6 +49,7 @@ using namespace std;
 static list<string> includes;
 static list<string> libraries;
 static vector<string> commands;
+static string compiler;
 
 static string templateHeader = "void cshell_stmt(int argc, char* argv[])\n"
 	"{\n";
@@ -187,7 +188,7 @@ static bool execute(const std::string& inputFile)
 {
 	ostringstream cmdLine;
 
-	cmdLine << "gcc ";
+	cmdLine << compiler << ' ';
 
 	for (list<string>::const_iterator it(libraries.begin()),
 		end(libraries.end()); it != end; ++it)
@@ -236,6 +237,21 @@ static bool execute(const std::string& inputFile)
 
 int main(int argc, char **argv)
 {
+	/* Detect compiler */
+	string comp = (!getenv("COMPILER") ? "" : getenv("COMPILER"));
+	if ((comp == "gcc") ||
+			(comp == "g++"))
+	{
+		compiler = comp;
+		cout << "Using \"" << compiler << "\" compiler." << endl;
+	}
+	else
+	{
+		if (!comp.empty())
+			cout << "Provided compiler which will be unsafe: "
+				<< comp << endl;
+		compiler = "gcc";
+	}
 	CLI cli;
 	includes.push_back("stdlib.h");
 	includes.push_back("stdio.h");
