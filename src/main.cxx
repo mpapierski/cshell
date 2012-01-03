@@ -1,18 +1,6 @@
 /**
- *  This file is part of cshell.
- *
- *  cshell is free software: you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation, either version 3 of the License, or
- *  (at your option) any later version.
- *
- *  cshell is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with cshell.  If not, see <http://www.gnu.org/licenses/>.
+ *  Execute C/C++ statements in an interactive shell
+ *  Copyright (C) 2012  Michał Papierski
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -46,13 +34,19 @@
 
 using namespace std;
 
+/* List of #includes */
 static list<string> includes;
+/* Link libraries */
 static list<string> libraries;
+/* Command list */
 static vector<string> commands;
+/* Compiler to use. */
 static string compiler;
 
+/* Source header */
 static string templateHeader = "void cshell_stmt(int argc, char* argv[])\n"
 	"{\n";
+/* Source footer */
 static string templateFooter = "}\n"
 	"int\n"
 	"main(int argc, char* argv[])\n"
@@ -61,6 +55,9 @@ static string templateFooter = "}\n"
 	"\treturn 0;\n"
 	"}";
 
+/**
+ * Command line interpreter wrapper
+ */
 class CLI
 {
 	private:
@@ -186,6 +183,7 @@ static void systemOrThrow(const std::string& commandLine)
  */
 static bool execute(const std::string& inputFile)
 {
+	/* Produce a command line */
 	ostringstream cmdLine;
 
 	cmdLine << compiler << ' ';
@@ -237,6 +235,10 @@ static bool execute(const std::string& inputFile)
 
 int main(int argc, char **argv)
 {
+	cout << argv[0] << " Copyright (C) 2012 Michał Papierski" << endl
+		<< "This program comes with ABSOLUTELY NO WARRANTY" << endl
+		<< "This is free software, and you are welcome to redistribute it"
+		<< "under certain condition." << endl << endl;
 	/* Detect compiler */
 	string comp = (!getenv("COMPILER") ? "" : getenv("COMPILER"));
 	if ((comp == "gcc") ||
@@ -253,8 +255,6 @@ int main(int argc, char **argv)
 		compiler = "gcc";
 	}
 	CLI cli;
-	includes.push_back("stdlib.h");
-	includes.push_back("stdio.h");
 
 	while (cli)
 	{
