@@ -48,7 +48,7 @@ using namespace std;
 
 static list<string> includes;
 static list<string> libraries;
-static list<string> commands;
+static vector<string> commands;
 
 static string templateHeader = "void cshell_stmt(int argc, char* argv[])\n"
 	"{\n";
@@ -123,8 +123,13 @@ string CLI::loop()
 	return input;
 }
 
+/**
+ * Generate source code string.
+ * @return Source code ready to compile
+ */
 static string sourceCode()
 {
+	/* 1. Write includes */
 	ostringstream out;
 	for (list<string>::const_iterator it(includes.begin()),
 			end(includes.end()); it != end; ++it)
@@ -132,32 +137,64 @@ static string sourceCode()
 		out << "#include <" << *it << ">" << endl;
 	}
 
+	/* 2. Write header (begin of a function) */
 	out << templateHeader << endl;
 
-	for (list<string>::const_iterator it(commands.begin()),
+	for (vector<string>::const_iterator it(commands.begin()),
 			end(commands.end()); it != end; ++it)
 	{
 		out << *it << endl;
 	}
+	
+	/* 3. Write footer (end of a function and a main) */
 	out << templateFooter << endl;
 
+	/* 4. */
 	return out.str();
 }
 
+/**
+ * Execute command in shell, if error happens throw
+ * string with detailed error from the OS.
+ * @param commandLine Command line
+ */
+static void systemOrThrow(const std::string& commandLine)
+{
+	int result = system(commandLine.c_str());
+	if (result == -1)
+	{
+		/* Failed to do system call. */
+		int errcodev = errno;
+		char* strerr = strerror(errcodev);
+		string strobj(strerr);
+		free(strerr);
+		throw strobj;
+	}
+	else if (result > 0)
+	{
+		/* Child process probably failed and we
+ 		 * do not know about exit code. */
+		throw string("Unknown error.");
+	}
+}
+
+/**
+ * Compile and execute source code passed by string
+ * @param inputFile Source code
+ * @return True on success
+ */
 static bool execute(const std::string& inputFile)
 {
-	vector<char*> params;
-	params.resize(libraries.size());
-	int i = 0;
+	ostringstream cmdLine;
+
+	cmdLine << "gcc ";
+
 	for (list<string>::const_iterator it(libraries.begin()),
 		end(libraries.end()); it != end; ++it)
 	{
-		/*
- 		 * Remember not to write to params,
- 		 * because weird things might happen
- 		 */
-		params[i++] = const_cast<char*>(it->c_str());
+		cmdLine << "-l" << *it << ' ';
 	}
+
 	/* Write source code to a temporary file */
 	char* temp = strdup("/tmp/cshellXXXXXX");
 	close(mkstemp(temp));
@@ -168,31 +205,32 @@ static bool execute(const std::string& inputFile)
 		fout << inputFile << endl;
 	}
 
-	/* Complete parameters... */
-		string compiler = "gcc";
-		params.insert(params.begin(), const_cast<char*>(compiler.c_str()));
-		string outputParam = "-o";
-		params.push_back(const_cast<char*>(tempC.c_str()));
-		params.push_back(const_cast<char*>(outputParam.c_str()));
-		params.push_back(temp);
-		params.push_back(NULL);
-	for (vector<char*>::iterator it(params.begin()), end(params.end()); it != end; ++it)
+	cmdLine << tempC << " -o " << temp;
+
+	/* Compile */
+	try
 	{
-		cout << "\"" << *it << "\" ";
-	}
-	cout << endl;
-	
-	/* Fork from this point */
-	if (fork() == 0)
+		/* This behavior is not portable,
+ 		 * need to return exit code of child process
+ 		 * rather than result value from system call. */
+		systemOrThrow(cmdLine.str());
+	} catch (string e)
 	{
-		int resultCode = execvp("/usr/bin/gcc", &(params[0]));
-		if (resultCode == -1)
-		{
-			cout << "ERROR: #" << errno << " (" << strerror(errno) << ")" << endl;
-		}
-		return -1;
+		cout << "Compile error: " << e << endl;
+		return false;
 	}
-	cout << endl;
+
+	/* Run the actual output */
+	try
+	{
+		/* Same as above */
+ 		systemOrThrow(temp);
+	} catch (string e)
+	{
+		cout << "Run error: " << e << endl;
+		return false;
+	}
+
 	return true;
 }
 
@@ -242,6 +280,7 @@ int main(int argc, char **argv)
 		if (!execute(source))
 		{
 			cout << "Failed to compile." << endl;
+			commands.pop_back();
 		}
 	}
 	return 0;
